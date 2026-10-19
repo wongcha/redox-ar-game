@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b1020">
+<title>Electron Pass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Noto+Sans:wght@500;700&display=swap">
+<style>
+/* Layout: full-screen mirrored camera stage, with floating glass cards for quiz, results and survey. */
+:root{
+  --ink:#0b1020;          /* stage background */
+  --panel:rgba(14,20,36,.88);
+  --panel-solid:#121a2e;
+  --field:#0c1324;
+  --line:rgba(170,190,235,.20);
+  --text:#eef2fb;
+  --muted:#9aa8c6;
+  --donor:#f2a541;        /* species that give electrons */
+  --acceptor:#45c6d6;     /* species that take electrons */
+  --electron:#ffe45c;     /* the electron, and the main action colour */
+  --good:#5ad19a;
+  --bad:#ff7070;
+  --font-ui:"Lexend", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-chem:"Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--ink);color:var(--text);font-family:var(--font-ui);overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+[hidden]{display:none!important}
+#video{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+#stage{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+.chem{font-family:var(--font-chem);font-weight:700;letter-spacing:.01em}
+
+/* HUD */
+.hud{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;
+  padding-top:calc(env(safe-area-inset-top,0px) + 10px);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));pointer-events:none}
+.pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.2;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;gap:8px;align-items:center;max-width:100%}
+.pill b{font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+.dot.on{background:var(--good);box-shadow:0 0 10px var(--good)}
+.instr{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:5;width:min(640px,calc(100% - 32px));
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px 16px;font-size:15px;line-height:1.4;text-align:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none}
+.instr .count{display:block;color:var(--electron);font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 64px);transform:translateX(-50%);z-index:40;width:min(560px,calc(100% - 32px));
+  background:var(--panel-solid);border:1px solid var(--bad);border-radius:14px;padding:12px 16px;font-size:15px;line-height:1.4;text-align:center;pointer-events:none}
+.toast.ok{border-color:var(--good)}
+
+/* Overlays */
+.overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;overflow-y:auto;
+  background:rgba(5,8,16,.55);
+  padding-top:calc(env(safe-area-inset-top,0px) + 16px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{width:100%;max-width:620px;margin:auto;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px;display:grid;gap:16px;
+  box-shadow:0 24px 60px rgba(0,0,0,.45);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{margin:0;font-size:clamp(30px,7vw,46px);line-height:1.05;font-weight:700;text-wrap:balance}
+h1 .e{color:var(--electron)}
+h2{margin:0;font-size:clamp(22px,5vw,30px);line-height:1.15;font-weight:600;text-wrap:balance}
+p{margin:0;line-height:1.5;color:var(--muted);font-size:16px}
+.eq{font-family:var(--font-chem);font-weight:700;font-size:clamp(20px,5vw,28px);text-align:center;padding:14px;border-radius:14px;background:var(--field);border:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:50%}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:grid;gap:6px;min-width:0}
+.field label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+input{font:500 18px var(--font-ui);color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:12px;padding:14px;width:100%;-webkit-user-select:text;user-select:text}
+input:focus-visible{outline:3px solid var(--electron);outline-offset:1px}
+.err{color:var(--bad);font-size:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row > *{flex:1 1 200px}
+button{font-family:var(--font-ui);cursor:pointer;transition:transform .12s ease, outline-color .12s ease}
+button:focus-visible{outline:3px solid var(--electron);outline-offset:3px}
+.btn{min-height:56px;border-radius:14px;border:0;padding:14px 20px;font-size:17px;font-weight:600;background:var(--electron);color:#1d1800}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.btn.small{min-height:40px;padding:8px 14px;font-size:14px}
+.btn.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+.link{background:none;border:0;color:var(--muted);font-size:14px;text-decoration:underline;padding:6px;justify-self:center}
+.options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.opt{min-height:92px;border-radius:18px;border:2px solid var(--line);background:var(--field);color:var(--text);font-family:var(--font-chem);font-weight:700;font-size:clamp(26px,7vw,36px)}
+.opt.correct{border-color:var(--good);background:rgba(90,209,154,.16)}
+.opt.wrong{border-color:var(--bad);background:rgba(255,112,112,.14)}
+.opt:disabled{cursor:default}
+.feedback{border-radius:14px;padding:14px 16px;background:var(--field);border:1px solid var(--line);display:grid;gap:6px}
+.feedback strong{font-size:18px}
+.feedback.good strong{color:var(--good)}
+.feedback.bad strong{color:var(--bad)}
+.feedback p{color:var(--text)}
+.halves{display:grid;gap:10px}
+.half{border-radius:14px;padding:12px 14px;background:var(--field);border:1px solid var(--line);display:grid;gap:4px;min-width:0}
+.half .tag{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.half.ox .tag{color:var(--donor)}
+.half.red .tag{color:var(--acceptor)}
+.half .chem{font-size:20px;overflow-x:auto;white-space:nowrap}
+.half p{color:var(--text);font-size:15px}
+.likert{display:grid;gap:8px}
+.likert .q{color:var(--text);font-size:16px;line-height:1.45}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.scale button{min-height:52px;border-radius:12px;border:2px solid var(--line);background:var(--field);color:var(--text);font-size:18px;font-weight:600}
+.scale button.sel{border-color:var(--electron);background:rgba(255,228,92,.16)}
+.anchors{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.big{font-size:clamp(48px,14vw,72px);font-weight:700;color:var(--electron);line-height:1;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:4px;min-width:0}
+.stat b{font-size:24px;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+.spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--electron);animation:spin 1s linear infinite;justify-self:center}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Hand cursors and hand hover */
+.hand-cursor{position:fixed;left:0;top:0;z-index:60;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;border:3px solid var(--electron);pointer-events:none;box-shadow:0 0 14px rgba(255,228,92,.6)}
+.hand-cursor.pinch{background:rgba(255,228,92,.55);transform:scale(.8)}
+button.hand-hover{outline:3px solid var(--electron);outline-offset:3px;transform:scale(1.03)}
+@media (max-width:420px){.fields{grid-template-columns:1fr}.card{padding:18px}.stats{grid-template-columns:1fr 1fr 1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<video id="video" playsinline muted autoplay></video>
+<canvas id="stage" aria-label="Game stage"></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div class="pill"><b id="hudLevel">Level 1/4</b><span id="hudEq"></span></div>
+  <div class="pill"><span class="dot" id="handDot"></span><span id="hudHands">Touch</span><span>·</span><span>Score <b id="hudScore">0</b>/8</span></div>
+</div>
+<div class="instr" id="instr" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<!-- Start -->
+<section class="overlay" id="scrStart">
+  <div class="card">
+    <div class="eyebrow">Redox · Electrochemistry</div>
+    <h1>Electron <span class="e">Pass</span></h1>
+    <p>Grab electrons with your hand and pass them from the <b style="color:var(--donor)">reducing agent</b> to the <b style="color:var(--acceptor)">oxidizing agent</b>. Before each level, answer two quick questions.</p>
+    <div class="fields">
+      <div class="field"><label for="inId">Student ID</label><input id="inId" inputmode="numeric" autocomplete="off" placeholder="e.g. 66001"></div>
+      <div class="field"><label for="inRoom">Room</label><input id="inRoom" autocomplete="off" placeholder="e.g. M.4/1"></div>
+    </div>
+    <div class="err" id="startErr" hidden></div>
+    <div class="row">
+      <button class="btn" id="btnCam">Start with camera</button>
+      <button class="btn ghost" id="btnTouch">Play with touch</button>
+    </div>
+    <p style="font-size:14px">Camera mode: stand 1–2 m away, hand open to the camera. <b style="color:var(--text)">Pinch</b> thumb and index finger to grab an electron or press a button.</p>
+    <button class="link" id="btnTeacher">Teacher: data &amp; settings</button>
+  </div>
+</section>
+
+<!-- Loading -->
+<section class="overlay" id="scrLoading" hidden>
+  <div class="card" style="max-width:420px;text-align:center">
+    <div class="spinner"></div>
+    <h2 id="loadMsg">Starting the camera…</h2>
+    <p id="loadSub">Tap “Allow” if your browser asks for the camera.</p>
+    <div class="row" id="loadFail" hidden><button class="btn" id="btnFailTouch">Play with touch instead</button></div>
+  </div>
+</section>
+
+<!-- Quiz -->
+<section class="overlay" id="scrQuiz" hidden>
+  <div class="card">
+    <div class="eyebrow" id="qEyebrow">Level 1 · Question 1 of 2</div>
+    <div class="eq" id="qEq"></div>
+    <h2 id="qPrompt">Which species is the reducing agent?</h2>
+    <div class="options" id="qOptions"></div>
+    <div class="feedback" id="qFeedback" hidden><strong id="qFbTitle"></strong><p id="qFbText"></p></div>
+    <button class="btn" id="qNext" hidden>Continue</button>
+  </div>
+</section>
+
+<!-- Level complete -->
+<section class="overlay" id="scrDone" hidden>
+  <div class="card">
+    <div class="eyebrow" id="dEyebrow">Level 1 complete</div>
+    <div class="eq" id="dEq"></div>
+    <div class="halves">
+      <div class="half ox"><span class="tag">Oxidation · loses e⁻</span><span class="chem" id="dOx"></span><p id="dOxText"></p></div>
+      <div class="half red"><span class="tag">Reduction · gains e⁻</span><span class="chem" id="dRed"></span><p id="dRedText"></p></div>
+    </div>
+    <p id="dNote"></p>
+    <button class="btn" id="dNext">Next level</button>
+  </div>
+</section>
+
+<!-- Survey -->
+<section class="overlay" id="scrSurvey" hidden>
+  <div class="card">
+    <div class="eyebrow">Last step · your opinion</div>
+    <h2>How was the game?</h2>
+    <p>1 = strongly disagree, 5 = strongly agree.</p>
+    <div id="surveyItems" style="display:grid;gap:18px"></div>
+    <button class="btn" id="sSubmit" disabled>Submit</button>
+  </div>
+</section>
+
+<!-- Finish -->
+<section class="overlay" id="scrFinish" hidden>
+  <div class="card" style="text-align:center">
+    <div class="eyebrow">All 4 levels complete</div>
+    <div class="big" id="fScore">0/8</div>
+    <h2 id="fMsg">Quiz score</h2>
+    <p id="fSync"></p>
+    <button class="btn" id="fNext">Next student</button>
+  </div>
+</section>
+
+<!-- Teacher -->
+<section class="overlay" id="scrTeacher" hidden>
+  <div class="card">
+    <div class="eyebrow">Teacher</div>
+    <h2>Research data</h2>
+    <div class="stats">
+      <div class="stat"><b id="tRows">0</b><span>rows on this device</span></div>
+      <div class="stat"><b id="tStudents">0</b><span>students</span></div>
+      <div class="stat"><b id="tQueue">0</b><span>waiting to send</span></div>
+    </div>
+    <p id="tSheet"></p>
+    <div class="row">
+      <button class="btn" id="tCsv">Download data (CSV)</button>
+      <button class="btn ghost" id="tSend">Send to Google Sheet now</button>
+    </div>
+    <button class="btn danger small" id="tClear">Clear data on this device</button>
+    <button class="btn ghost" id="tClose">Back</button>
+  </div>
+</section>
+
+<script>
+/* ======================================================================
+   SETTINGS FOR THE TEACHER
+   Paste your Google Apps Script web app URL between the quotes so every
+   student's answers go into one Google Sheet. Leave it empty to keep data
+   only on the device (download it from the Teacher screen).
+   ====================================================================== */
+const SHEET_URL = "";
+
+const MP_VERSION = "0.10.14";
+const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@" + MP_VERSION;
+const HAND_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+const LEVELS = [
+  {
+    title: "Zinc and copper(II) ions",
+    eq: "Zn + Cu²⁺ → Zn²⁺ + Cu",
+    donors: [{ label: "Zn", product: "Zn²⁺", e: 2 }],
+    acceptors: [{ label: "Cu²⁺", product: "Cu", need: 2 }],
+    reducing: "Zn", oxidizing: "Cu²⁺",
+    roles: { "Zn": "reducing", "Cu²⁺": "oxidizing", "Zn²⁺": "product", "Cu": "product" },
+    ox: "Zn → Zn²⁺ + 2e⁻", red: "Cu²⁺ + 2e⁻ → Cu",
+    note: "Zinc dissolves and copper metal forms. This is the reaction that powers a Daniell cell."
+  },
+  {
+    title: "Magnesium in acid",
+    eq: "Mg + 2H⁺ → Mg²⁺ + H₂",
+    donors: [{ label: "Mg", product: "Mg²⁺", e: 2 }],
+    acceptors: [{ label: "H⁺", product: "H", need: 1 }, { label: "H⁺", product: "H", need: 1 }],
+    merge: "H₂",
+    reducing: "Mg", oxidizing: "H⁺",
+    roles: { "Mg": "reducing", "H⁺": "oxidizing", "Mg²⁺": "product", "H₂": "product" },
+    ox: "Mg → Mg²⁺ + 2e⁻", red: "2H⁺ + 2e⁻ → H₂",
+    note: "Each H⁺ gains one electron. Two H atoms join to make H₂, the gas bubbles you see when magnesium is put in acid."
+  },
+  {
+    title: "Iron and silver ions",
+    eq: "Fe + 2Ag⁺ → Fe²⁺ + 2Ag",
+    donors: [{ label: "Fe", product: "Fe²⁺", e: 2 }],
+    acceptors: [{ label: "Ag⁺", product: "Ag", need: 1 }, { label: "Ag⁺", product: "Ag", need: 1 }],
+    reducing: "Fe", oxidizing: "Ag⁺",
+    roles: { "Fe": "reducing", "Ag⁺": "oxidizing", "Fe²⁺": "product", "Ag": "product" },
+    ox: "Fe → Fe²⁺ + 2e⁻", red: "2Ag⁺ + 2e⁻ → 2Ag",
+    note: "One iron atom gives its two electrons to two different silver ions, so two silver atoms form."
+  },
+  {
+    title: "Permanganate challenge",
+    eq: "MnO₄⁻ + 5Fe²⁺ + 8H⁺ → Mn²⁺ + 5Fe³⁺ + 4H₂O",
+    donors: [1, 2, 3, 4, 5].map(() => ({ label: "Fe²⁺", product: "Fe³⁺", e: 1 })),
+    acceptors: [{ label: "MnO₄⁻", product: "Mn²⁺", need: 5 }],
+    reducing: "Fe²⁺", oxidizing: "MnO₄⁻",
+    roles: { "MnO₄⁻": "oxidizing", "Fe²⁺": "reducing", "H⁺": "spectator", "Mn²⁺": "product" },
+    ox: "5Fe²⁺ → 5Fe³⁺ + 5e⁻", red: "MnO₄⁻ + 8H⁺ + 5e⁻ → Mn²⁺ + 4H₂O",
+    note: "Mn goes from +7 in MnO₄⁻ to +2 in Mn²⁺, so it gains 5 electrons. H⁺ is not oxidized or reduced. It joins with oxygen to make water. An ion like Fe²⁺ can be a reducing agent too."
+  }
+];
+const TOTAL_Q = LEVELS.length * 2;
+
+const SURVEY = [
+  "The game helped me tell the difference between an oxidizing agent and a reducing agent.",
+  "Moving the electrons myself made the idea easier to remember.",
+  "I enjoyed learning with this game."
+];
+
+const COLS = ["row_id", "timestamp", "session_id", "student_id", "room", "device", "input_mode", "level", "item", "answer", "correct_answer", "correct", "time_ms", "misdrops", "detail"];
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+};
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const now = () => performance.now();
+const screens = ["scrStart", "scrLoading", "scrQuiz", "scrDone", "scrSurvey", "scrFinish", "scrTeacher"];
+function show(id) { screens.forEach(s => { $("#" + s).hidden = s !== id; }); }
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Android phone" : "Android tablet";
+  return "Computer";
+}
+let toastTimer = 0;
+function toast(msg, ok) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast" + (ok ? " ok" : ""); t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
+}
+
+/* ---------- data logging ---------- */
+let sending = false, flushTimer = 0;
+function logRow(r) {
+  const row = {
+    row_id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    timestamp: new Date().toISOString(),
+    session_id: game.sessionId, student_id: game.student ? game.student.id : "", room: game.student ? game.student.room : "",
+    device: deviceName(), input_mode: game.mode,
+    level: "", item: "", answer: "", correct_answer: "", correct: "", time_ms: "", misdrops: "", detail: ""
+  };
+  Object.assign(row, r);
+  const rows = store.get("redox_rows", []); rows.push(row); store.set("redox_rows", rows);
+  if (SHEET_URL) { const q = store.get("redox_queue", []); q.push(row); store.set("redox_queue", q); clearTimeout(flushTimer); flushTimer = setTimeout(flush, 1200); }
+}
+async function flush() {
+  if (!SHEET_URL || sending) return false;
+  const q = store.get("redox_queue", []);
+  if (!q.length) return true;
+  sending = true;
+  try {
+    await fetch(SHEET_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ rows: q }) });
+    const cur = store.get("redox_queue", []);
+    store.set("redox_queue", cur.slice(q.length));
+    return true;
+  } catch (e) { return false; }
+  finally { sending = false; }
+}
+setInterval(flush, 20000);
+window.addEventListener("online", flush);
+
+function toCSV(rows) {
+  const esc = v => { v = v == null ? "" : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  return "﻿" + [COLS.join(",")].concat(rows.map(r => COLS.map(c => esc(r[c])).join(","))).join("\r\n");
+}
+
+/* ---------- game state ---------- */
+const game = {
+  phase: "start", mode: "touch", student: null, sessionId: "",
+  levelIdx: 0, qIdx: 0, score: 0, q: null, qStart: 0,
+  species: [], electrons: [], held: new Map(),
+  levelStart: 0, misdrops: 0, grabs: { hand: 0, touch: 0 }, reducerSide: "A",
+  completeAt: 0, merge: 0, sessionStart: 0, survey: []
+};
+
+/* ---------- canvas ---------- */
+const stage = $("#stage"), ctx = stage.getContext("2d"), video = $("#video");
+let W = 0, H = 0, DPR = 1;
+const C = {};
+function readColors() { const cs = getComputedStyle(document.documentElement); ["donor", "acceptor", "electron", "good", "bad", "text", "muted", "ink"].forEach(k => C[k] = cs.getPropertyValue("--" + k).trim()); }
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = window.innerWidth; H = window.innerHeight;
+  stage.width = Math.round(W * DPR); stage.height = Math.round(H * DPR); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (game.species.length) layoutSpecies();
+}
+window.addEventListener("resize", resize);
+
+function hexA(hex, a) { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+
+/* ---------- camera + hand tracking ---------- */
+let landmarker = null, camOn = false, lastVideoTime = -1;
+async function startCamera() {
+  if (camOn) return;
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  video.srcObject = stream;
+  await new Promise(res => { if (video.readyState >= 2) res(); else video.onloadeddata = () => res(); });
+  try { await video.play(); } catch (e) { }
+  camOn = true;
+}
+async function loadLandmarker() {
+  if (landmarker) return landmarker;
+  const vision = await import(MP_BASE + "/vision_bundle.mjs");
+  const files = await vision.FilesetResolver.forVisionTasks(MP_BASE + "/wasm");
+  const opts = d => ({ baseOptions: { modelAssetPath: HAND_MODEL, delegate: d }, runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+  try { landmarker = await vision.HandLandmarker.createFromOptions(files, opts("GPU")); }
+  catch (e) { landmarker = await vision.HandLandmarker.createFromOptions(files, opts("CPU")); }
+  return landmarker;
+}
+function videoRect() {
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const s = Math.max(W / vw, H / vh), dw = vw * s, dh = vh * s;
+  return { ox: (W - dw) / 2, oy: (H - dh) / 2, dw, dh };
+}
+
+/* Tracked hands: matched frame to frame by position so a held electron stays in the same hand. */
+const tracked = [];
+let trackSeq = 0;
+const cursorEls = [];
+function cursorEl(i) {
+  while (cursorEls.length <= i) { const d = document.createElement("div"); d.className = "hand-cursor"; d.hidden = true; document.body.appendChild(d); cursorEls.push(d); }
+  return cursorEls[i];
+}
+function processHands(res) {
+  const t = now(), vr = videoRect();
+  const dets = (res && res.landmarks ? res.landmarks : []).map(lm => {
+    const P = i => ({ x: vr.ox + (1 - lm[i].x) * vr.dw, y: vr.oy + lm[i].y * vr.dh });
+    const th = P(4), ix = P(8), w = P(0), mid = P(9);
+    const size = Math.hypot(w.x - mid.x, w.y - mid.y) || 1;
+    return { x: (th.x + ix.x) / 2, y: (th.y + ix.y) / 2, ratio: Math.hypot(th.x - ix.x, th.y - ix.y) / size };
+  });
+  const used = new Set();
+  dets.forEach(d => {
+    let best = null, bd = Math.min(W, H) * 0.35;
+    tracked.forEach(h => { if (used.has(h)) return; const dd = Math.hypot(h.x - d.x, h.y - d.y); if (dd < bd) { bd = dd; best = h; } });
+    if (!best) { best = { id: "hand" + (++trackSeq), x: d.x, y: d.y, pinch: false, last: t }; tracked.push(best); }
+    used.add(best);
+    best.x += (d.x - best.x) * 0.55; best.y += (d.y - best.y) * 0.55; best.last = t;
+    const wasPinch = best.pinch;
+    if (!wasPinch && d.ratio < 0.32) { best.pinch = true; onPinchStart(best); }
+    else if (wasPinch && d.ratio > 0.48) { best.pinch = false; onPinchEnd(best); }
+    else if (best.pinch) moveHeld(best.id, best.x, best.y);
+  });
+  for (let i = tracked.length - 1; i >= 0; i--) {
+    const h = tracked[i];
+    if (t - h.last > 400) { if (h.pinch) releaseHeld(h.id, null, null); tracked.splice(i, 1); }
+  }
+  updateHandUI();
+}
+function updateHandUI() {
+  document.querySelectorAll(".hand-hover").forEach(b => b.classList.remove("hand-hover"));
+  cursorEls.forEach(c => c.hidden = true);
+  tracked.forEach((h, i) => {
+    const c = cursorEl(i); c.hidden = false; c.style.transform = `translate(${h.x}px,${h.y}px)` + (h.pinch ? " scale(.8)" : ""); c.classList.toggle("pinch", h.pinch);
+    if (game.phase !== "play") { const b = buttonAt(h.x, h.y); if (b) b.classList.add("hand-hover"); }
+  });
+  const n = tracked.length;
+  $("#handDot").classList.toggle("on", n > 0);
+  $("#hudHands").textContent = game.mode === "hand" ? (n ? n + (n > 1 ? " hands" : " hand") : "Show your hand") : "Touch";
+}
+function buttonAt(x, y) {
+  const els = document.elementsFromPoint(x, y);
+  for (const el of els) { if (el.classList && el.classList.contains("hand-cursor")) continue; const b = el.closest && el.closest("button"); if (b && !b.disabled && b.offsetParent !== null) return b; if (el.classList && el.classList.contains("card")) break; }
+  return null;
+}
+function onPinchStart(h) {
+  if (game.phase === "play") { grabAt(h.id, h.x, h.y, "hand"); return; }
+  const b = buttonAt(h.x, h.y);
+  if (b) b.click();
+}
+function onPinchEnd(h) { releaseHeld(h.id, h.x, h.y); }
+
+/* Touch / mouse also works in every mode */
+stage.addEventListener("pointerdown", e => { if (game.phase !== "play") return; try { stage.setPointerCapture(e.pointerId); } catch (_) { } grabAt("p" + e.pointerId, e.clientX, e.clientY, "touch"); });
+stage.addEventListener("pointermove", e => moveHeld("p" + e.pointerId, e.clientX, e.clientY));
+stage.addEventListener("pointerup", e => releaseHeld("p" + e.pointerId, e.clientX, e.clientY));
+stage.addEventListener("pointercancel", e => releaseHeld("p" + e.pointerId, null, null));
+
+/* ---------- species and electrons ---------- */
+function buildSpecies() {
+  const L = LEVELS[game.levelIdx];
+  game.species = []; game.electrons = []; game.held.clear(); game.merge = 0;
+  let eid = 0;
+  L.donors.forEach((d, k) => {
+    const s = { id: "d" + k, kind: "donor", label: d.label, product: d.product, left: d.e, total: d.e, done: false, morph: 0, flash: 0, x: 0, y: 0, r: 40 };
+    game.species.push(s);
+    for (let i = 0; i < d.e; i++) game.electrons.push({ id: eid++, home: s, owner: s, state: "orbit", ang: i * Math.PI * 2 / d.e + Math.random(), x: 0, y: 0, px: 0, py: 0, fade: 0 });
+  });
+  L.acceptors.forEach((a, k) => game.species.push({ id: "a" + k, kind: "acceptor", label: a.label, product: a.product, need: a.need, got: 0, done: false, morph: 0, flash: 0, x: 0, y: 0, r: 40 }));
+  layoutSpecies();
+  game.electrons.forEach(e => { e.x = e.owner.x; e.y = e.owner.y; });
+}
+function layoutSpecies() {
+  const land = W >= H * 0.95;
+  const groups = { donor: [], acceptor: [] };
+  game.species.forEach(s => groups[s.kind].push(s));
+  /* Large groups (Level 4) wrap into two lines of at most 3 so nothing clips on a phone. */
+  const perLine = n => n <= 3 ? n : Math.ceil(n / 2);
+  const maxN = Math.max(perLine(groups.donor.length), perLine(groups.acceptor.length));
+  const wraps = Math.max(groups.donor.length, groups.acceptor.length) > 3;
+  /* Free band between the top status pills and the bottom instruction bar */
+  const top = land ? 70 : 110, bottom = H - (land ? 110 : 130), band = Math.max(200, bottom - top);
+  const base = Math.min(W, band);
+  let r = base * (wraps ? 0.075 : 0.12);
+  const span = land ? band * 0.7 : W * 0.72;
+  if (maxN > 1) r = Math.min(r, span / (maxN - 1) * 0.3);
+  if (wraps && !land) r = Math.min(r, band * 0.055);
+  r = Math.max(22, Math.min(r, 110));
+  ["donor", "acceptor"].forEach(kind => {
+    const side = kind === "donor" ? game.reducerSide : (game.reducerSide === "A" ? "B" : "A");
+    const arr = groups[kind], n = arr.length, per = perLine(n), lines = Math.ceil(n / per);
+    arr.forEach((s, k) => {
+      const line = Math.floor(k / per), inLine = Math.min(per, n - line * per), j = k - line * per;
+      const t = inLine === 1 ? 0.5 : (j + (per - inLine) / 2) / (per - 1);
+      const off = lines === 1 ? 0 : (line - (lines - 1) / 2);
+      if (land) { s.x = (side === "A" ? 0.22 : 0.78) * W + off * W * 0.13; s.y = top + band * (0.15 + 0.7 * t); }
+      else { s.x = W * (0.14 + 0.72 * t); s.y = top + band * (side === "A" ? 0.24 : 0.7) + off * band * 0.2; }
+      s.r = r;
+    });
+  });
+}
+function speciesAt(x, y) {
+  let best = null, bd = Infinity;
+  game.species.forEach(s => { const d = Math.hypot(x - s.x, y - s.y); if (d < s.r * 1.45 && d < bd) { bd = d; best = s; } });
+  return best;
+}
+function grabAt(key, x, y, how) {
+  if (game.phase !== "play" || game.held.has(key)) return;
+  let best = null, bd = Infinity;
+  game.electrons.forEach(e => { if (e.state !== "orbit") return; const d = Math.hypot(x - e.x, y - e.y); if (d < bd) { bd = d; best = e; } });
+  const reach = Math.max(56, (game.species[0] ? game.species[0].r : 40) * 0.8);
+  if (!best || bd > reach) {
+    const s = speciesAt(x, y);
+    best = s && s.kind === "donor" ? game.electrons.find(e => e.state === "orbit" && e.owner === s) : null;
+    if (!best && s && s.kind === "acceptor") toast(`${s.label} takes electrons. Grab an electron from the species that gives them.`);
+  }
+  if (!best) return;
+  best.state = "held"; best.px = x; best.py = y; game.held.set(key, best); game.grabs[how]++;
+}
+function moveHeld(key, x, y) { const e = game.held.get(key); if (e) { e.px = x; e.py = y; } }
+function releaseHeld(key, x, y) {
+  const e = game.held.get(key); if (!e) return;
+  game.held.delete(key);
+  const hit = x == null ? null : speciesAt(x, y);
+  if (hit && hit.kind === "acceptor" && !hit.done) {
+    e.state = "docked"; e.owner = hit; e.ang = hit.got * Math.PI * 2 / hit.need;
+    hit.got++; e.home.left--;
+    if (e.home.left <= 0) e.home.done = true;
+    if (hit.got >= hit.need) hit.done = true;
+    if (game.species.every(s => s.kind === "donor" || s.done)) levelComplete();
+    return;
+  }
+  if (hit && hit.kind === "acceptor" && hit.done) toast(`${hit.label} already has all the electrons it needs.`);
+  else if (hit && hit.kind === "donor" && hit !== e.home) {
+    game.misdrops++; hit.flash = 1;
+    toast(`${hit.label} is giving electrons away, not taking them. Carry it to the species that gains electrons.`);
+  }
+  e.state = "orbit"; e.owner = e.home;
+}
+function movedCount() { return game.electrons.filter(e => e.state === "docked").length; }
+
+/* ---------- loop ---------- */
+let lastT = 0;
+function loop(t) {
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0); lastT = t;
+  if (landmarker && camOn && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    try { processHands(landmarker.detectForVideo(video, t)); } catch (e) { }
+  }
+  update(dt); draw(t);
+  requestAnimationFrame(loop);
+}
+function update(dt) {
+  if (game.phase !== "play" && game.phase !== "done") return;
+  game.species.forEach(s => { if (s.done) s.morph = Math.min(1, s.morph + dt * 1.6); s.flash = Math.max(0, s.flash - dt * 1.5); });
+  const L = LEVELS[game.levelIdx];
+  if (L.merge && game.species.filter(s => s.kind === "acceptor").every(s => s.done)) game.merge = Math.min(1, game.merge + dt * 1.2);
+  for (let i = game.electrons.length - 1; i >= 0; i--) {
+    const e = game.electrons[i];
+    let tx, ty, k = 10;
+    if (e.state === "held") { tx = e.px; ty = e.py; k = 22; }
+    else {
+      e.ang += dt * (e.state === "docked" ? 2.4 : 1.6);
+      const o = e.owner, R = o.r * 1.32;
+      const p = speciesPos(o);
+      tx = p.x + Math.cos(e.ang) * R; ty = p.y + Math.sin(e.ang) * R;
+      if (e.state === "docked" && o.done) { e.fade += dt * 1.4; if (e.fade >= 1) { game.electrons.splice(i, 1); continue; } }
+    }
+    const a = Math.min(1, dt * k); e.x += (tx - e.x) * a; e.y += (ty - e.y) * a;
+  }
+  if (game.phase === "play") {
+    const total = LEVELS[game.levelIdx].donors.reduce((n, d) => n + d.e, 0);
+    $("#instrCount").textContent = `Electrons moved: ${game.completeAt ? total : movedCount()} / ${total}`;
+  }
+}
+function speciesPos(s) {
+  const L = LEVELS[game.levelIdx];
+  if (!L.merge || s.kind !== "acceptor" || game.merge <= 0) return { x: s.x, y: s.y };
+  const acc = game.species.filter(a => a.kind === "acceptor");
+  const mx = acc.reduce((n, a) => n + a.x, 0) / acc.length, my = acc.reduce((n, a) => n + a.y, 0) / acc.length;
+  const m = easeInOut(game.merge);
+  return { x: s.x + (mx - s.x) * m, y: s.y + (my - s.y) * m };
+}
+const easeInOut = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+function draw(t) {
+  ctx.clearRect(0, 0, W, H);
+  if (camOn) {
+    const vr = videoRect();
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(video, W - vr.ox - vr.dw, vr.oy, vr.dw, vr.dh); ctx.restore();
+    ctx.fillStyle = "rgba(7,11,22,0.42)"; ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = C.ink; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(170,190,235,0.06)"; ctx.lineWidth = 1;
+    const g = 40; ctx.beginPath();
+    for (let x = (W % g) / 2; x < W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = (H % g) / 2; y < H; y += g) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+  }
+  if (game.phase !== "play" && game.phase !== "done") return;
+  const L = LEVELS[game.levelIdx];
+  const acc = game.species.filter(s => s.kind === "acceptor");
+  const merged = L.merge && game.merge > 0;
+  game.species.forEach(s => {
+    if (merged && s.kind === "acceptor") { const p = speciesPos(s); drawSpecies(s, p.x, p.y, 1 - easeInOut(game.merge)); }
+    else drawSpecies(s, s.x, s.y, 1);
+  });
+  if (merged) {
+    const p = speciesPos(acc[0]);
+    drawBubble(p.x, p.y, acc[0].r * 1.1, C.acceptor, L.merge, "formed", easeInOut(game.merge), game.merge);
+  }
+  game.electrons.forEach(e => drawElectron(e, t));
+}
+function drawSpecies(s, x, y, alpha) {
+  if (alpha <= 0.01) return;
+  const col = s.kind === "donor" ? C.donor : C.acceptor;
+  ctx.save(); ctx.globalAlpha = alpha;
+  if (s.done && s.morph < 1) {
+    ctx.strokeStyle = hexA(col, 1 - s.morph); ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(x, y, s.r * (1 + s.morph * 0.9), 0, Math.PI * 2); ctx.stroke();
+  }
+  if (s.flash > 0) { ctx.strokeStyle = hexA(C.bad, s.flash); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, s.r * 1.12, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.globalAlpha = alpha;
+  const g = ctx.createRadialGradient(x - s.r * 0.35, y - s.r * 0.35, s.r * 0.1, x, y, s.r);
+  g.addColorStop(0, hexA(col, s.done ? 0.95 : 0.85)); g.addColorStop(1, hexA(col, s.done ? 0.55 : 0.32));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, s.r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = hexA(col, 0.95); ctx.lineWidth = 2.5; ctx.stroke();
+  const fs = Math.max(16, s.r * 0.52);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const m = s.morph;
+  const drawLabel = (txt, a, sc) => { if (a <= 0) return; ctx.save(); ctx.globalAlpha = alpha * a; ctx.translate(x, y); ctx.scale(sc, sc); ctx.fillStyle = "#ffffff"; ctx.font = `700 ${fs}px "Noto Sans", Arial, sans-serif`; ctx.fillText(txt, 0, 0); ctx.restore(); };
+  drawLabel(s.label, 1 - m, 1 - m * 0.3);
+  drawLabel(s.product, m, 0.7 + m * 0.3);
+  const sub = s.kind === "donor" ? (s.done ? "oxidized" : `gives ${s.left} e⁻`) : (s.done ? "reduced" : `needs ${s.need - s.got} e⁻`);
+  ctx.globalAlpha = alpha; ctx.fillStyle = s.done ? "#ffffff" : hexA(col, 1);
+  ctx.font = `600 ${Math.max(12, s.r * 0.22)}px Lexend, system-ui, sans-serif`;
+  ctx.fillText(sub, x, y + s.r * 1.32 + Math.max(13, Math.min(W, H) * 0.028) + 12);
+  ctx.restore();
+}
+function drawBubble(x, y, r, col, label, sub, a, grow) {
+  ctx.save(); ctx.globalAlpha = a;
+  const rr = r * (0.6 + 0.4 * grow);
+  const g = ctx.createRadialGradient(x - rr * 0.35, y - rr * 0.35, rr * 0.1, x, y, rr);
+  g.addColorStop(0, hexA(col, 0.95)); g.addColorStop(1, hexA(col, 0.5));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = hexA(col, 1); ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `700 ${Math.max(18, rr * 0.55)}px "Noto Sans", Arial, sans-serif`; ctx.fillText(label, x, y);
+  ctx.font = `600 ${Math.max(12, rr * 0.22)}px Lexend, system-ui, sans-serif`; ctx.fillText(sub, x, y + rr + Math.max(16, rr * 0.55));
+  ctx.restore();
+}
+function drawElectron(e, t) {
+  const r = Math.max(13, Math.min(W, H) * 0.028) * (e.state === "held" ? 1.25 : 1);
+  ctx.save(); ctx.globalAlpha = 1 - e.fade;
+  ctx.shadowColor = C.electron; ctx.shadowBlur = e.state === "held" ? 26 : 14;
+  ctx.fillStyle = C.electron; ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0; ctx.fillStyle = "#1d1800"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `700 ${r * 0.95}px "Noto Sans", Arial, sans-serif`; ctx.fillText("e⁻", e.x, e.y + 1);
+  ctx.restore();
+}
+
+/* ---------- flow ---------- */
+function setHUD() {
+  const L = LEVELS[game.levelIdx];
+  $("#hudLevel").textContent = `Level ${game.levelIdx + 1}/${LEVELS.length}`;
+  $("#hudEq").textContent = L.title;
+  $("#hudScore").textContent = game.score;
+}
+function startLevel(i) {
+  game.levelIdx = i; game.qIdx = 0; game.species = []; game.electrons = []; game.completeAt = 0;
+  setHUD(); showQuestion();
+}
+function showQuestion() {
+  const L = LEVELS[game.levelIdx];
+  const key = game.qIdx === 0 ? "reducing" : "oxidizing";
+  game.q = { key, answer: L[key], options: shuffle(Object.keys(L.roles)) };
+  game.phase = "quiz"; $("#hud").hidden = false; $("#instr").hidden = true;
+  $("#qEyebrow").textContent = `Level ${game.levelIdx + 1} · Question ${game.qIdx + 1} of 2`;
+  $("#qEq").textContent = L.eq;
+  $("#qPrompt").textContent = key === "reducing" ? "Which species is the reducing agent?" : "Which species is the oxidizing agent?";
+  const box = $("#qOptions"); box.innerHTML = "";
+  game.q.options.forEach(o => {
+    const b = document.createElement("button"); b.className = "opt"; b.textContent = o;
+    b.addEventListener("click", () => answer(o, b)); box.appendChild(b);
+  });
+  $("#qFeedback").hidden = true; $("#qNext").hidden = true;
+  show("scrQuiz"); game.qStart = now();
+}
+function explain(L, key, picked) {
+  const base = key === "reducing"
+    ? `${L.reducing} loses electrons, so it is oxidized. That makes it the reducing agent.`
+    : `${L.oxidizing} gains electrons, so it is reduced. That makes it the oxidizing agent.`;
+  if (picked === L[key]) return base;
+  const role = L.roles[picked];
+  const lead = role === "product" ? `${picked} is a product. Oxidizing and reducing agents are reactants. `
+    : role === "spectator" ? `${picked} is not oxidized or reduced in this reaction. `
+      : role === "oxidizing" ? `${picked} gains electrons, so it is the oxidizing agent. `
+        : role === "reducing" ? `${picked} loses electrons, so it is the reducing agent. ` : "";
+  return lead + base;
+}
+function answer(opt, btn) {
+  if (game.phase !== "quiz") return;
+  game.phase = "feedback";
+  const L = LEVELS[game.levelIdx], q = game.q, ok = opt === q.answer, ms = Math.round(now() - game.qStart);
+  if (ok) game.score++;
+  $("#hudScore").textContent = game.score;
+  document.querySelectorAll("#qOptions .opt").forEach(b => { b.disabled = true; if (b.textContent === q.answer) b.classList.add("correct"); });
+  if (!ok) btn.classList.add("wrong");
+  const fb = $("#qFeedback"); fb.hidden = false; fb.className = "feedback " + (ok ? "good" : "bad");
+  $("#qFbTitle").textContent = ok ? "Correct" : "Not quite";
+  $("#qFbText").textContent = explain(L, q.key, opt);
+  $("#qNext").hidden = false; $("#qNext").textContent = game.qIdx === 0 ? "Next question" : "Play the level";
+  logRow({ level: game.levelIdx + 1, item: "quiz_" + q.key + "_agent", answer: opt, correct_answer: q.answer, correct: ok ? 1 : 0, time_ms: ms, detail: "options: " + q.options.join(" | ") });
+}
+$("#qNext").addEventListener("click", () => {
+  if (game.phase !== "feedback") return;
+  game.qIdx++;
+  if (game.qIdx < 2) showQuestion(); else beginPlay();
+});
+function beginPlay() {
+  game.reducerSide = Math.random() < 0.5 ? "A" : "B";
+  game.misdrops = 0; game.grabs = { hand: 0, touch: 0 }; game.completeAt = 0;
+  buildSpecies();
+  game.phase = "play"; show(null);
+  const hint = game.mode === "hand" ? "Pinch an electron (e⁻) and carry it" : "Drag an electron (e⁻)";
+  $("#instr").innerHTML = `${hint} to the species that <b style="color:var(--acceptor)">gains electrons</b>.<span class="count" id="instrCount"></span>`;
+  $("#instr").hidden = false;
+  game.levelStart = now();
+}
+function levelComplete() {
+  if (game.completeAt) return;
+  game.completeAt = now();
+  const L = LEVELS[game.levelIdx];
+  logRow({ level: game.levelIdx + 1, item: "transfer", time_ms: Math.round(game.completeAt - game.levelStart), misdrops: game.misdrops,
+    detail: `reducer_side=${game.reducerSide === "A" ? (W >= H * 0.95 ? "left" : "top") : (W >= H * 0.95 ? "right" : "bottom")}; grabs_hand=${game.grabs.hand}; grabs_touch=${game.grabs.touch}` });
+  setTimeout(() => { game.phase = "done"; showDone(); }, L.merge ? 1900 : 1300);
+}
+let doneTimer = 0;
+function showDone() {
+  const L = LEVELS[game.levelIdx], last = game.levelIdx === LEVELS.length - 1;
+  $("#dEyebrow").textContent = `Level ${game.levelIdx + 1} complete`;
+  $("#dEq").textContent = L.eq;
+  $("#dOx").textContent = L.ox; $("#dRed").textContent = L.red;
+  $("#dOxText").textContent = `${L.reducing} is oxidized, so ${L.reducing} is the reducing agent.`;
+  $("#dRedText").textContent = `${L.oxidizing} is reduced, so ${L.oxidizing} is the oxidizing agent.`;
+  $("#dNote").textContent = L.note;
+  $("#instr").hidden = true;
+  show("scrDone");
+  let n = 15; const label = last ? "Finish" : "Next level";
+  const btn = $("#dNext"); btn.textContent = `${label} (${n})`;
+  clearInterval(doneTimer);
+  doneTimer = setInterval(() => { n--; btn.textContent = `${label} (${n})`; if (n <= 0) btn.click(); }, 1000);
+}
+$("#dNext").addEventListener("click", () => {
+  if (game.phase !== "done") return;
+  clearInterval(doneTimer);
+  if (game.levelIdx < LEVELS.length - 1) startLevel(game.levelIdx + 1); else showSurvey();
+});
+function showSurvey() {
+  game.phase = "survey"; game.survey = SURVEY.map(() => 0); game.species = []; game.electrons = [];
+  const box = $("#surveyItems"); box.innerHTML = "";
+  SURVEY.forEach((q, i) => {
+    const wrap = document.createElement("div"); wrap.className = "likert";
+    const p = document.createElement("div"); p.className = "q"; p.textContent = `${i + 1}. ${q}`; wrap.appendChild(p);
+    const sc = document.createElement("div"); sc.className = "scale";
+    for (let v = 1; v <= 5; v++) {
+      const b = document.createElement("button"); b.textContent = v; b.setAttribute("aria-label", `${v} of 5`);
+      b.addEventListener("click", () => { game.survey[i] = v; sc.querySelectorAll("button").forEach(x => x.classList.toggle("sel", x === b)); $("#sSubmit").disabled = game.survey.some(x => !x); });
+      sc.appendChild(b);
+    }
+    wrap.appendChild(sc);
+    const an = document.createElement("div"); an.className = "anchors"; an.innerHTML = "<span>Strongly disagree</span><span>Strongly agree</span>"; wrap.appendChild(an);
+    box.appendChild(wrap);
+  });
+  $("#sSubmit").disabled = true;
+  show("scrSurvey");
+}
+$("#sSubmit").addEventListener("click", async () => {
+  if (game.phase !== "survey" || game.survey.some(x => !x)) return;
+  game.survey.forEach((v, i) => logRow({ item: "survey_q" + (i + 1), answer: v, detail: SURVEY[i] }));
+  logRow({ item: "session_end", answer: game.score, correct_answer: TOTAL_Q, time_ms: Math.round(now() - game.sessionStart) });
+  game.phase = "finish";
+  $("#fScore").textContent = `${game.score}/${TOTAL_Q}`;
+  $("#fMsg").textContent = game.score >= 7 ? "Excellent. You can tell the two agents apart." : game.score >= 5 ? "Good work. Review the levels you missed." : "Keep practising: the reducing agent loses electrons.";
+  $("#fSync").textContent = SHEET_URL ? "Sending your answers…" : "Your answers are saved on this device.";
+  show("scrFinish");
+  if (SHEET_URL) { const ok = await flush(); $("#fSync").textContent = ok && !store.get("redox_queue", []).length ? "Your answers were sent to your teacher." : "Saved. They will be sent when the internet is back."; }
+});
+$("#fNext").addEventListener("click", () => {
+  $("#inId").value = ""; game.phase = "start"; game.student = null; $("#hud").hidden = true; show("scrStart");
+});
+
+/* ---------- start ---------- */
+function readStudent() {
+  const id = $("#inId").value.trim(), room = $("#inRoom").value.trim();
+  const err = $("#startErr");
+  if (!id) { err.textContent = "Type your student ID first."; err.hidden = false; $("#inId").focus(); return null; }
+  err.hidden = true; store.set("redox_last_room", room);
+  return { id, room };
+}
+function beginSession(mode) {
+  game.mode = mode; game.score = 0;
+  game.sessionId = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  game.sessionStart = now();
+  logRow({ item: "session_start", detail: `screen=${W}x${H}; camera=${camOn ? "on" : "off"}` });
+  if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => { });
+  startLevel(0);
+}
+$("#btnCam").addEventListener("click", async () => {
+  const st = readStudent(); if (!st) return;
+  game.student = st;
+  if (camOn && landmarker) { beginSession("hand"); return; }
+  show("scrLoading"); $("#loadFail").hidden = true; $(".spinner").hidden = false;
+  $("#loadMsg").textContent = "Starting the camera…"; $("#loadSub").textContent = "Tap “Allow” if your browser asks for the camera.";
+  try { await startCamera(); }
+  catch (e) {
+    $(".spinner").hidden = true; $("#loadMsg").textContent = "The camera didn't start";
+    $("#loadSub").textContent = location.protocol === "file:" ? "Open the game from its web link (https), not from a saved file." : "Allow camera access for this site in your browser settings, then reload the page.";
+    $("#loadFail").hidden = false; return;
+  }
+  $("#loadMsg").textContent = "Loading hand tracking…"; $("#loadSub").textContent = "This takes a few seconds the first time.";
+  try { await loadLandmarker(); }
+  catch (e) {
+    $(".spinner").hidden = true; $("#loadMsg").textContent = "Hand tracking didn't load";
+    $("#loadSub").textContent = "Check the internet connection and reload. You can also play with touch now."; $("#loadFail").hidden = false; return;
+  }
+  beginSession("hand");
+});
+$("#btnTouch").addEventListener("click", () => { const st = readStudent(); if (!st) return; game.student = st; beginSession("touch"); });
+$("#btnFailTouch").addEventListener("click", () => beginSession("touch"));
+[$("#inId"), $("#inRoom")].forEach(i => i.addEventListener("keydown", e => { if (e.key === "Enter") $("#btnCam").click(); }));
+
+/* ---------- teacher ---------- */
+let clearArmed = false;
+function refreshTeacher() {
+  const rows = store.get("redox_rows", []);
+  $("#tRows").textContent = rows.length;
+  $("#tStudents").textContent = new Set(rows.map(r => r.student_id).filter(Boolean)).size;
+  $("#tQueue").textContent = store.get("redox_queue", []).length;
+  $("#tSheet").textContent = SHEET_URL ? "Google Sheet is connected. Answers are sent automatically." : "Google Sheet is not connected, so data stays on this device. Download the CSV after class.";
+  $("#tSend").hidden = !SHEET_URL;
+  clearArmed = false; $("#tClear").textContent = "Clear data on this device";
+}
+$("#btnTeacher").addEventListener("click", () => { game.phase = "teacher"; refreshTeacher(); show("scrTeacher"); });
+$("#tClose").addEventListener("click", () => { game.phase = "start"; show("scrStart"); });
+$("#tCsv").addEventListener("click", () => {
+  const rows = store.get("redox_rows", []);
+  if (!rows.length) { toast("No data on this device yet."); return; }
+  const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `redox-data-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+});
+$("#tSend").addEventListener("click", async () => { const ok = await flush(); refreshTeacher(); toast(ok ? "Sent to Google Sheet." : "Couldn't send. Check the internet.", ok); });
+$("#tClear").addEventListener("click", () => {
+  if (!clearArmed) { clearArmed = true; $("#tClear").textContent = "Tap again to delete all data on this device"; return; }
+  store.set("redox_rows", []); store.set("redox_queue", []); refreshTeacher(); toast("Data on this device was cleared.", true);
+});
+
+/* ---------- boot ---------- */
+readColors(); resize();
+$("#inRoom").value = store.get("redox_last_room", "");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
